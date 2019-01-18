@@ -1,10 +1,11 @@
 (ns ^:figwheel-hooks paren.hero
   (:require
-   [goog.dom :as gdom]
-   [goog.events :as gevents]
-   [goog.events.KeyHandler]
-   [oops.core :refer [ocall oget oset!]]
-   [clojure.string :as string]))
+    [goog.dom :as gdom]
+    [goog.events.KeyHandler]
+    [oops.core :refer [ocall oget oset!]]
+    [clojure.string :as string]
+    [paren.keyboard :as keyboard]
+    [clojure.set :as set]))
 
 ;; define your app data so that it doesn't get over-written on reload
 (def init-state
@@ -22,8 +23,40 @@
                    {:text ")"}
                    {:text " 3"}]
             :success {:text "( + 1 2 3 )"}
-            :chord #{17 65}
+            :chord #{:a :ctrl-left}
             :velocity 0.06}]})
+
+(def slots (set (range 10)))
+
+(defn free-slot
+  [game-state]
+  (let [{:keys [forms]} game-state
+        in-use (set (map :slot forms))]
+    (if (< (count in-use) 3)
+      (first (shuffle (set/difference slots in-use))))))
+
+
+(defn generate-form
+  [game-state]
+  (when-some [slot (free-slot game-state)]
+    (merge
+      {:slot slot
+       :progress 0.0
+       :chord #{:a :ctrl-left}
+       :velocity (+ 0.2 (* 0.2 (rand)))}
+      (rand-nth
+        [{:bits [{:text "{ "}
+                 {:text "[k v]"
+                  :hot? true}
+                 {:text " }"}]
+          :success {:text "{ k v }"}}
+
+         {:bits [{:text "("}
+                 {:text " + 1 2 "
+                  :hot? true}
+                 {:text ")"}
+                 {:text " 3"}]
+          :success {:text "( + 1 2 3 )"}}]))))
 
 (defn chord-pressed
   "Returns the time the chord was completed"
@@ -31,11 +64,12 @@
   (when (= (set (keys ks)) chord)
     (apply max (vals ks))))
 
+(defn toggle-debug
+  [gs]
+  (assoc gs :debug? (not (:debug? gs))))
+
 (def game-state
   (atom init-state))
-
-(defn init! []
-  (reset! game-state init-state))
 
 (def canvas
   (gdom/getElement "canvas"))
@@ -80,15 +114,63 @@
     (and (<= bx cx)
          (<= (+ cx cw) (+ bx bw)))))
 
+(defn explode
+  [form]
+  (let [chars (mapcat :text (:bits form))
+        x (:x form)
+        y (:y form)
+        xoff (volatile! x)
+        {:keys [elapsed-time]} @game-state]
+
+    (oset! cx "font"  "80px Menlo")
+
+    (assoc form :exploding? true
+                :bits (-> (mapv
+                            (fn [char]
+                              (let [text (str char)]
+                                {:text text
+                                 :x (vswap! xoff + (oget (ocall cx "measureText" text) "width"))
+                                 :y y
+                                 :wait-until (+ elapsed-time 0.5)
+                                 :velocity [(- (rand 2) 1)
+                                            (- (rand 2) 1)]
+                                 :color (rand-nth ["#00FF00"
+                                                   "#11FF11"
+                                                   "#aaFFaa"])}))
+                            chars)
+                          (conj {:text (rand-nth ["Perfect!"
+                                                  "Nice Job!"
+                                                  "Good!"
+                                                  "Great!"])
+                                 :font "36px Rockwell"
+                                 :x (+ x 128 (* (rand) 64))
+                                 :y (- y 64 (* (rand) 32))
+                                 :wait-until (dec elapsed-time)
+                                 :velocity [0.0 -0.8]
+                                 :color "#FFFFFF"})))))
+
+(defn update-exploding
+  [form]
+  (let [{:keys [delta
+                elapsed-time]} @game-state]
+    (update form :bits (partial mapv (fn [bit]
+                                       (let [{:keys [velocity
+                                                     x
+                                                     y
+                                                     wait-until]} bit
+                                             [xd yd] velocity]
+                                         (if (< elapsed-time wait-until)
+                                           bit
+                                           (assoc bit :x (+ (* 100.0 xd delta) x)
+                                                      :y (+ (* 100.0 yd delta) y)))))))))
+
 (defn update-form
   [form]
-  (oset! cx "font"  "80px Menlo")
   (let [{:keys [bits
                 progress
                 slot
                 chord
-                success
-                win?]} form
+                success]} form
         {:keys [size
                 caret
                 elapsed-time
@@ -97,39 +179,43 @@
         x (- cw (* progress cw))
         y (+ 100 (* slot (/ ch 10)))
         form (assoc form :x x,
-                    :y y,
-                    :active? false
-                    :color "#FFFFFF")]
-    (loop [i 0
-           xacc x
-           form form
-           bits bits]
-      (if-not (< i (count bits))
-        (assoc form :bits bits)
-        (let [bit (nth bits i)
-              {:keys [text]} bit
-              w (oget (ocall cx "measureText" text) "width")
-              bit (assoc bit :y y :w w :x xacc)
-              active? (and (:hot? bit)
-                           (intersects? bit caret))
-              active-from (or (:active-from form) elapsed-time)
-              win? (or win? (> (chord-pressed chord keys) active-from))
-              form (if active?
-                     (assoc form
-                            :color "#FF0000"
-                            :active-from active-from)
-                     form)
-              bit (assoc bit :active? active?)]
-          (if win?
-            (assoc form
-                   :bits [(assoc success :x x :y y)]
-                   :win? true
-                   :color "#00FF00") 
-            (recur (inc i)
-                   (+ xacc w)
-                   (assoc form
-                          :active? (or (:active? form) active?))
-                   (assoc bits i bit))))))))
+                         :y y,
+                         :active? false
+                         :color "#FFFFFF")]
+    (if (:exploding? form)
+      (update-exploding form)
+      (do
+        (oset! cx "font" "80px Menlo")
+        (loop [i 0
+               xacc x
+               form form
+               bits bits]
+          (if-not (< i (count bits))
+            (assoc form :bits bits)
+            (let [bit (nth bits i)
+                  {:keys [text]} bit
+                  w (oget (ocall cx "measureText" text) "width")
+                  bit (assoc bit :y y :w w :x xacc)
+                  active? (and (:hot? bit)
+                               (intersects? bit caret))
+                  active-from (or (:active-from form) elapsed-time)
+                  win? (> (chord-pressed chord keys) active-from)
+                  form (if active?
+                         (assoc form
+                           :color "#f1f442"
+                           :active-from active-from)
+                         form)
+                  bit (assoc bit :active? active?)]
+              (if win?
+                (explode
+                  (assoc form
+                    :bits [(assoc success :x x :y y)]))
+
+                (recur (inc i)
+                       (+ xacc w)
+                       (assoc form
+                         :active? (or (:active? form) active?))
+                       (assoc bits i bit))))))))))
 
 (defn key-up
   [game-state key-code]
@@ -140,7 +226,11 @@
   (assoc-in game-state [:keys key-code] (:elapsed-time game-state)))
 
 (defn draw-bit [bit]
-  (let [{:keys [text x y]} bit]
+  (let [{:keys [text x y font color]} bit]
+    (when (some? color)
+      (oset! cx "fillStyle" color))
+    (when (some? font)
+      (oset! cx "font" font))
     (ocall cx "fillText" text x y )))
 
 (defn draw-form
@@ -160,21 +250,30 @@
     (ocall cx "fillRect" x y w h)))
 
 (defn draw [game-state]
-  (let [{:keys [last-time forms size]} game-state
+  (let [{:keys [last-time forms size debug?]} game-state
         {:keys [cw ch]} size]
     (draw-caret game-state)
     (run! draw-form forms)
-    (puts (with-out-str (cljs.pprint/pprint game-state)))))
+    (when debug?
+      (puts (with-out-str (cljs.pprint/pprint game-state))))))
+
+(defn filter-forms [forms]
+  (filterv (fn [form] (<= (:progress form) 2.0)) forms))
 
 (defn update-forms [game-state]
   (let [{:keys [delta]} game-state]
     (update game-state :forms
-            (fn [forms]
-              (mapv (fn [f]
-                     (let [{:keys [progress velocity]} f
-                           new-progress (+ progress (* delta velocity))]
-                       (-> (assoc f :progress new-progress)
-                           (update-form)))) forms)))))
+            (comp filter-forms
+                  (fn [forms]
+                    (mapv (fn [f]
+                            (let [{:keys [progress velocity]} f
+                                  new-progress (+ progress (* delta velocity))]
+                              (-> (assoc f :progress new-progress)
+                                  (update-form)))) forms))
+                  (fn [forms]
+                    (if-some [form (generate-form game-state)]
+                      (conj forms form)
+                      forms))))))
 
 (defonce last-time (atom nil))
 
@@ -227,17 +326,27 @@
 (defn key-up-handler
   [event]
   (let [key-code (oget event "keyCode")]
-    (swap! game-state key-up key-code)))
+    (swap! game-state key-up (keyboard/key key-code))))
 
 (defn key-down-handler
   [event]
   (let [key-code (oget event "keyCode")]
-    (swap! game-state key-down key-code)))
+    (swap! game-state key-down (keyboard/key key-code))))
+
+(defn key-press-handler [event]
+  (let [key-code (oget event "keyCode")
+        key (keyboard/key key-code)]
+    (swap!
+      game-state
+      (case key
+        :num-1 toggle-debug
+        identity))))
 
 (defn init-input
   []
-  (oset! js/document "onkeydown" key-down-handler)
-  (oset! js/document "onkeyup" key-up-handler))
+  (oset! js/document "onkeydown" (fn [event] (key-down-handler event)))
+  (oset! js/document "onkeyup" (fn [event] (key-up-handler event)))
+  (oset! js/document "onkeypress" (fn [event] (key-press-handler event))))
 
 (defonce _ (do
              (init-input)
@@ -249,4 +358,4 @@
   ;; optionally touch your app-state to force rerendering depending on
   ;; your application
   ;; (swap! app-state update-in [:__figwheel_counter] inc)
-)
+  )
