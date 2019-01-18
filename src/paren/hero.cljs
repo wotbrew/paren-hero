@@ -21,8 +21,9 @@
                     :hot? true}
                    {:text ")"}
                    {:text " 3"}]
+            :success {:text "( + 1 2 3 )"}
             :chord #{17 65}
-            :velocity 0.02}]})
+            :velocity 0.06}]})
 
 (defn chord-pressed
   "Returns the time the chord was completed"
@@ -85,7 +86,9 @@
   (let [{:keys [bits
                 progress
                 slot
-                chord]} form
+                chord
+                success
+                win?]} form
         {:keys [size
                 caret
                 elapsed-time
@@ -110,18 +113,23 @@
               active? (and (:hot? bit)
                            (intersects? bit caret))
               active-from (or (:active-from form) elapsed-time)
-              win? (> (chord-pressed chord keys) active-from)
+              win? (or win? (> (chord-pressed chord keys) active-from))
               form (if active?
                      (assoc form
-                            :color (if win? "#00FF00" "#FF0000")
+                            :color "#FF0000"
                             :active-from active-from)
                      form)
               bit (assoc bit :active? active?)]
-          (recur (inc i)
-                 (+ xacc w)
-                 (assoc form
-                        :active? (or (:active? form) active?))
-                 (assoc bits i bit)))))))
+          (if win?
+            (assoc form
+                   :bits [(assoc success :x x :y y)]
+                   :win? true
+                   :color "#00FF00") 
+            (recur (inc i)
+                   (+ xacc w)
+                   (assoc form
+                          :active? (or (:active? form) active?))
+                   (assoc bits i bit))))))))
 
 (defn key-up
   [game-state key-code]
