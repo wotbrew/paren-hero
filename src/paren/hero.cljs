@@ -3,7 +3,8 @@
    [goog.dom :as gdom]
    [goog.events :as gevents]
    [goog.events.KeyHandler]
-   [oops.core :refer [ocall oget oset!]]))
+   [oops.core :refer [ocall oget oset!]]
+   [clojure.string :as string]))
 
 ;; define your app data so that it doesn't get over-written on reload
 (def init-state
@@ -13,14 +14,21 @@
                  :ch 0}
    :caret {:x 0
            :y 0}
-   :forms [{:progress 0.2
+   :forms [{:progress 0.5
             :slot 0
             :bits [{:text "("}
                    {:text " + 1 2 "
                     :hot? true}
                    {:text ")"}
                    {:text " 3"}]
-            :velocity 0.1}]})
+            :chord #{17 65}
+            :velocity 0.02}]})
+
+(defn chord-pressed
+  "Returns the time the chord was completed"
+  [chord ks]
+  (when (= (set (keys ks)) chord)
+    (apply max (vals ks))))
 
 (def game-state
   (atom init-state))
@@ -37,10 +45,16 @@
 (defn puts
   [s]
   (let [{:keys [size]} @game-state
-        {:keys [cw ch]} size]
+        {:keys [cw ch]} size
+        lines (reverse (string/split s #"\n"))]
     (oset! cx "fillStyle" "#FFFFFF")
-    (oset! cx "font"  "18px Menlo")
-    (ocall cx "fillText" (str s) (/ cw 2) (/ ch 2))))
+    (oset! cx "font"  "10px Menlo")
+    (loop [[l & more] lines
+           y 20]
+      (ocall cx "fillText" l 0 (- ch y))
+      (when more
+        (recur more
+               (+ y 12))))))
 
 (defn get-size
   []
@@ -70,16 +84,19 @@
   (oset! cx "font"  "80px Menlo")
   (let [{:keys [bits
                 progress
-                slot]} form
+                slot
+                chord]} form
         {:keys [size
-                caret]} @game-state
+                caret
+                elapsed-time
+                keys]} @game-state
         {:keys [cw ch]} size
         x (- cw (* progress cw))
         y (+ 100 (* slot (/ ch 10)))
         form (assoc form :x x,
-                         :y y,
-                         :active? false
-                         :color "#FFFFFF")]
+                    :y y,
+                    :active? false
+                    :color "#FFFFFF")]
     (loop [i 0
            xacc x
            form form
@@ -92,13 +109,18 @@
               bit (assoc bit :y y :w w :x xacc)
               active? (and (:hot? bit)
                            (intersects? bit caret))
+              active-from (or (:active-from form) elapsed-time)
+              win? (> (chord-pressed chord keys) active-from)
               form (if active?
-                     (assoc form :color "#FF0000")
+                     (assoc form
+                            :color (if win? "#00FF00" "#FF0000")
+                            :active-from active-from)
                      form)
               bit (assoc bit :active? active?)]
           (recur (inc i)
                  (+ xacc w)
-                 (assoc form :active? (or (:active? form) active?))
+                 (assoc form
+                        :active? (or (:active? form) active?))
                  (assoc bits i bit)))))))
 
 (defn key-up
@@ -134,9 +156,7 @@
         {:keys [cw ch]} size]
     (draw-caret game-state)
     (run! draw-form forms)
-
-    (puts (:keys game-state))
-    ))
+    (puts (with-out-str (cljs.pprint/pprint game-state)))))
 
 (defn update-forms [game-state]
   (let [{:keys [delta]} game-state]
