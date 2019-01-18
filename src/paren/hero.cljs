@@ -15,16 +15,7 @@
                  :ch 0}
    :caret {:x 0
            :y 0}
-   :forms [{:progress 0.5
-            :slot 0
-            :bits [{:text "("}
-                   {:text " + 1 2 "
-                    :hot? true}
-                   {:text ")"}
-                   {:text " 3"}]
-            :success {:text "( + 1 2 3 )"}
-            :chord #{:a :ctrl-left}
-            :velocity 0.06}]})
+   :forms []})
 
 (def slots (set (range 10)))
 
@@ -35,6 +26,54 @@
     (if (< (count in-use) 3)
       (first (shuffle (set/difference slots in-use))))))
 
+(def form-lib
+  [{:chord #{:s :ctrl-left}
+    :bits [{:text "{"}
+           {:text " [k v] "
+            :hot? true}
+           {:text "}"}]
+    :success {:text "{ k v }"}}
+
+   {:chord #{:d :ctrl-left}
+    :bits [{:text "("}
+           {:text " + 1 2 "
+            :hot? true}
+           {:text ")"}
+           {:text " 3"}]
+    :success {:text "(+ 1 2 3)"}}
+
+   {:chord #{:a :ctrl-left}
+    :bits [{:text "+ ("}
+           {:text " 1 2 "
+            :hot? true}
+           {:text ")"}]
+    :success {:text "(+ 1 2 3)"}}
+
+   {:chord #{:s :ctrl-left}
+    :bits [{:text "[["}
+           {:text " free-me! "
+            :hot? true}
+           {:text "]]"}]
+
+    :step {:chord #{:s :ctrl-left}
+           :bits [{:text "["}
+                  {:text " once-more! "
+                   :hot? true}
+                  {:text "]"}]
+           :success {:text "thank-you!"}}}
+
+
+   {:chord #{:d :ctrl-left}
+    :bits [{:text "["}
+           {:text " a b c "
+            :hot? true}
+           {:text "] d e"}]
+    :step {:chord #{:d :ctrl-left}
+           :bits [{:text "["}
+                  {:text " a b c d"
+                   :hot? true}
+                  {:text "] e"}]
+           :success {:text "[a b c d e]"}}}])
 
 (defn generate-form
   [game-state]
@@ -42,21 +81,11 @@
     (merge
       {:slot slot
        :progress 0.0
-       :chord #{:a :ctrl-left}
+       :ocolor (rand-nth ["#d366ff"
+                         "#54ffeb"
+                          "#fa9eff"])
        :velocity (+ 0.2 (* 0.2 (rand)))}
-      (rand-nth
-        [{:bits [{:text "{ "}
-                 {:text "[k v]"
-                  :hot? true}
-                 {:text " }"}]
-          :success {:text "{ k v }"}}
-
-         {:bits [{:text "("}
-                 {:text " + 1 2 "
-                  :hot? true}
-                 {:text ")"}
-                 {:text " 3"}]
-          :success {:text "( + 1 2 3 )"}}]))))
+      (rand-nth form-lib))))
 
 (defn chord-pressed
   "Returns the time the chord was completed"
@@ -99,11 +128,15 @@
 
 (defn update-caret
   [game-state]
-  (let [{:keys [size]} game-state
-        {:keys [cw ch]} size]
-    (assoc game-state :caret {:x (* cw 0.25)
+  (let [{:keys [elapsed-time
+                size]} game-state
+        {:keys [cw ch]} size
+
+        pulse? (< (mod elapsed-time 1.2) 0.6)
+        w (if pulse? 5 2)]
+    (assoc game-state :caret {:x (- (* cw 0.25) (/ w 2))
                               :y 0
-                              :w 2
+                              :w w
                               :h ch})))
 
 
@@ -114,9 +147,15 @@
     (and (<= bx cx)
          (<= (+ cx cw) (+ bx bw)))))
 
+(defn maybe-flip-sign
+  [n]
+  (if (< 0.5 (rand))
+    (- n)
+    n))
+
 (defn explode
   [form]
-  (let [chars (mapcat :text (:bits form))
+  (let [chars (:text (:success form ""))
         x (:x form)
         y (:y form)
         xoff (volatile! x)
@@ -132,8 +171,8 @@
                                  :x (vswap! xoff + (oget (ocall cx "measureText" text) "width"))
                                  :y y
                                  :wait-until (+ elapsed-time 0.5)
-                                 :velocity [(- (rand 2) 1)
-                                            (- (rand 2) 1)]
+                                 :velocity [(maybe-flip-sign (+ 0.5 (rand 0.5)))
+                                            (maybe-flip-sign (+ 0.5 (rand 0.5)))]
                                  :color (rand-nth ["#00FF00"
                                                    "#11FF11"
                                                    "#aaFFaa"])}))
@@ -152,25 +191,40 @@
 (defn update-exploding
   [form]
   (let [{:keys [delta
-                elapsed-time]} @game-state]
-    (update form :bits (partial mapv (fn [bit]
-                                       (let [{:keys [velocity
-                                                     x
-                                                     y
-                                                     wait-until]} bit
-                                             [xd yd] velocity]
-                                         (if (< elapsed-time wait-until)
-                                           bit
-                                           (assoc bit :x (+ (* 100.0 xd delta) x)
-                                                      :y (+ (* 100.0 yd delta) y)))))))))
+                elapsed-time]} @game-state
+        {:keys [bits velocity]} form]
+    (assoc form
+      :velocity (+ velocity (* velocity delta))
+      :bits (->> bits
+                 (mapv (fn [bit]
+                         (let [{:keys [velocity
+                                       x
+                                       y
+                                       wait-until]} bit
+                               [xd yd] velocity]
+                           (if (< elapsed-time wait-until)
+                             bit
+                             (assoc bit
+                               :velocity [(+ xd (* -1 delta xd))
+                                          (+ yd (* -1 delta yd))]
+                               :x (+ (* 500.0 xd delta) x)
+                               :y (+ (* 500.0 yd delta) y))))))))))
+
+(defn win
+  [form]
+  (let [{:keys [success
+                step]} form]
+    (cond
+      step (merge (dissoc form :step :active-from) step)
+      success (explode form)
+      :else form)))
 
 (defn update-form
   [form]
   (let [{:keys [bits
                 progress
                 slot
-                chord
-                success]} form
+                chord]} form
         {:keys [size
                 caret
                 elapsed-time
@@ -181,7 +235,7 @@
         form (assoc form :x x,
                          :y y,
                          :active? false
-                         :color "#FFFFFF")]
+                         :color (:ocolor form))]
     (if (:exploding? form)
       (update-exploding form)
       (do
@@ -199,7 +253,7 @@
                   active? (and (:hot? bit)
                                (intersects? bit caret))
                   active-from (or (:active-from form) elapsed-time)
-                  win? (> (chord-pressed chord keys) active-from)
+                  win? (and active? (> (chord-pressed chord keys) active-from))
                   form (if active?
                          (assoc form
                            :color "#f1f442"
@@ -207,10 +261,7 @@
                          form)
                   bit (assoc bit :active? active?)]
               (if win?
-                (explode
-                  (assoc form
-                    :bits [(assoc success :x x :y y)]))
-
+                (win form)
                 (recur (inc i)
                        (+ xacc w)
                        (assoc form
