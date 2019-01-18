@@ -15,7 +15,10 @@
                  :ch 0}
    :caret {:x 0
            :y 0}
+   :score 0
    :forms []})
+
+(def ^:dynamic *score* nil)
 
 (def slots (set (range 10)))
 
@@ -32,6 +35,7 @@
            {:text " [k v] "
             :hot? true}
            {:text "}"}]
+    :value 10
     :success {:text "{ k v }"}}
 
    {:chord #{:d :ctrl-left}
@@ -40,6 +44,7 @@
             :hot? true}
            {:text ")"}
            {:text " 3"}]
+    :value 10
     :success {:text "(+ 1 2 3)"}}
 
    {:chord #{:a :ctrl-left}
@@ -47,6 +52,7 @@
            {:text " 1 2 "
             :hot? true}
            {:text ")"}]
+    :value 10
     :success {:text "(+ 1 2 3)"}}
 
    {:chord #{:s :ctrl-left}
@@ -56,6 +62,7 @@
            {:text "]]"}]
 
     :step {:chord #{:s :ctrl-left}
+           :value 20
            :bits [{:text "["}
                   {:text " once-more! "
                    :hot? true}
@@ -69,6 +76,7 @@
             :hot? true}
            {:text "] d e"}]
     :step {:chord #{:d :ctrl-left}
+           :value 20
            :bits [{:text "["}
                   {:text " a b c d"
                    :hot? true}
@@ -80,6 +88,7 @@
   (when-some [slot (free-slot game-state)]
     (merge
       {:slot slot
+       :value 10
        :progress 0.0
        :ocolor (rand-nth ["#d366ff"
                          "#54ffeb"
@@ -156,10 +165,13 @@
 (defn explode
   [form]
   (let [chars (:text (:success form ""))
+        value (:value form)
         x (:x form)
         y (:y form)
         xoff (volatile! x)
         {:keys [elapsed-time]} @game-state]
+
+    (set! *score* (+ *score* (or value 0)))
 
     (oset! cx "font"  "80px Menlo")
 
@@ -170,7 +182,7 @@
                                 {:text text
                                  :x (vswap! xoff + (oget (ocall cx "measureText" text) "width"))
                                  :y y
-                                 :wait-until (+ elapsed-time 0.5)
+                                 :wait-until (+ elapsed-time 0.3)
                                  :velocity [(maybe-flip-sign (+ 0.5 (rand 0.5)))
                                             (maybe-flip-sign (+ 0.5 (rand 0.5)))]
                                  :color (rand-nth ["#00FF00"
@@ -301,10 +313,19 @@
     (ocall cx "fillRect" x y w h)))
 
 (defn draw [game-state]
-  (let [{:keys [last-time forms size debug?]} game-state
+  (let [{:keys [last-time
+                score
+                forms
+                size
+                debug?]} game-state
         {:keys [cw ch]} size]
     (draw-caret game-state)
     (run! draw-form forms)
+
+    (oset! cx "fillStyle" "#FFFFFF")
+    (oset! cx "font" "80px Rockwell")
+    (ocall cx "fillText" (str score) (- cw 128) 64)
+
     (when debug?
       (puts (with-out-str (cljs.pprint/pprint game-state))))))
 
@@ -342,13 +363,15 @@
   [game-state envstate]
   (let [{:keys [elapsed-time]} game-state
         {:keys [delta size]} envstate]
-    (-> (assoc
-          game-state
-          :size size
-          :elapsed-time (+ elapsed-time delta)
-          :delta delta)
-        (update-caret)
-        (update-forms))))
+    (binding [*score* (:score game-state)]
+      (-> (assoc
+            game-state
+            :size size
+            :elapsed-time (+ elapsed-time delta)
+            :delta delta)
+          (update-caret)
+          (update-forms)
+          ((fn [g] (assoc g :score *score*)))))))
 
 (defn clear-screen
   [cw ch]
