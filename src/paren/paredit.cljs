@@ -101,7 +101,7 @@
 (defmethod paredit-op :splice
   [form _]
   (let [caret-pos (find-char form {:char caret-marker})
-        _ (assert (some? caret-pos "Couldn't find caret"))
+        _ (assert (some? caret-pos) "Couldn't find caret")
         end (find-char form {:chars end-markers
                              :pos caret-pos
                              :direction :forward})
