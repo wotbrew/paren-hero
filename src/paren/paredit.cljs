@@ -13,7 +13,7 @@
               :end-markers start-markers}})
 
 (defn find-char
-  "Takes a form with and start position and  moves until char (or member of chars) is found"
+  "Takes a form and start position and moves until char (or member of chars) is found"
   [form opts]
   (let [{:keys [char pos direction chars]
          :or {pos 0
@@ -28,7 +28,7 @@
           :else (recur (move i)))))))
 
 (defn find-exp
-  "Takes a form and start position and Returns the start and end of the next exp"
+  "Takes a form and start position and returns the start and end of the next exp"
   [form opts]
   (let [form (vec form)
         {:keys [start depth pos direction]
