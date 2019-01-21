@@ -23,7 +23,8 @@
       (let [c (get form i)]
         (cond
           (or (contains? chars c) (= c char)) i
-          rest (recur (move i)))))))
+          (nil? c) nil
+          :else (recur (move i)))))))
 
 (defn find-exp
   "Returns the start and end of the next exp"
@@ -77,12 +78,9 @@
   "Takes a form with a caret | in it and returns a form slurped right"
   [form]
   (let [caret-pos (find-char form {:char \|})
+        _ (assert (some? caret-pos) "Couldn't find caret")
         next-paren (find-char form {:pos caret-pos :chars end-markers})
         {:keys [start end]} (find-exp form {:pos (inc next-paren)})]
     (move-char form {:old-pos next-paren :new-pos end})))
-
-
-
-
 
 

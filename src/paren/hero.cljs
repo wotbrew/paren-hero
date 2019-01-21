@@ -5,6 +5,7 @@
     [oops.core :refer [ocall oget oset!]]
     [clojure.string :as string]
     [paren.keyboard :as keyboard]
+    [paren.paredit :as paredit]
     [clojure.set :as set]))
 
 ;; define your app data so that it doesn't get over-written on reload
