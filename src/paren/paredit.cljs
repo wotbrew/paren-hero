@@ -13,7 +13,7 @@
               :end-markers start-markers}})
 
 (defn find-char
-  "Takes a vector of chars and moves until char (or member of chars) is found"
+  "Takes a form with and start position and  moves until char (or member of chars) is found"
   [form opts]
   (let [{:keys [char pos direction chars]
          :or {pos 0
@@ -28,7 +28,7 @@
           :else (recur (move i)))))))
 
 (defn find-exp
-  "Returns the start and end of the next exp"
+  "Takes a form and start position and Returns the start and end of the next exp"
   [form opts]
   (let [form (vec form)
         {:keys [start depth pos direction]
@@ -64,7 +64,7 @@
                                :pos (move pos))))))
 
 (defn move-char
-  "Removes the char at old-pos and puts it in at new-pos"
+  "Takes a form and removes the char at old-pos and puts it in at new-pos"
   [form opts]
   (let [{:keys [old-pos new-pos]} opts
         c (get form old-pos)
@@ -76,7 +76,7 @@
          (subs form' new-pos))))
 
 (defn remove-chars
-  "Replaces the char at given positions"
+  "Takes a form and removes the char at given positions"
   [form & positions]
   (let [{:keys [pos s]} (reduce
                           (fn [acc position]
