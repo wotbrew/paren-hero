@@ -2,6 +2,7 @@
 
 (def start-markers #{\( \[ \{})
 (def end-markers #{\) \] \}})
+(def caret-marker \|)
 
 (def config
   {:forward {:move inc
@@ -74,13 +75,40 @@
          c
          (subs form' new-pos))))
 
-(defn slurp-right
-  "Takes a form with a caret | in it and returns a form slurped right"
+(defn remove-chars
+  "Replaces the char at given positions"
+  [form & positions]
+  (let [{:keys [pos s]} (reduce
+                          (fn [acc position]
+                            (let [{:keys [pos s]} acc]
+                              {:s (str s (subs form pos position))
+                               :pos (inc position)}))
+                          {:pos 0
+                           :s ""}
+                          positions)]
+    (str s (subs form pos))))
+
+(defmulti paredit-op (fn [form op] op))
+
+(defmethod paredit-op :slurp-right
   [form]
-  (let [caret-pos (find-char form {:char \|})
+  (let [caret-pos (find-char form {:char caret-marker})
         _ (assert (some? caret-pos) "Couldn't find caret")
         next-paren (find-char form {:pos caret-pos :chars end-markers})
         {:keys [start end]} (find-exp form {:pos (inc next-paren)})]
     (move-char form {:old-pos next-paren :new-pos end})))
+
+(defmethod paredit-op :splice
+  [form _]
+  (let [caret-pos (find-char form {:char caret-marker})
+        _ (assert (some? caret-pos "Couldn't find caret"))
+        end (find-char form {:chars end-markers
+                             :pos caret-pos
+                             :direction :forward})
+        start (find-char form {:chars start-markers
+                               :pos caret-pos
+                               :direction :backward})]
+    (remove-chars form start end)))
+
 
 
